@@ -1,6 +1,6 @@
 # MailioEvaporate (work in progress)
 
-![35%](https://progress-bar.dev/50)
+![35%](https://progress-bar.dev/35)
 
 This project was generated with [Angular CLI](https://github.com/angular/angular-cli) version 12.2.12.
 
