@@ -12,4 +12,5 @@ export interface UploadStats {
   message?: string,
   progress: number,
   status: UploadStatus,
+  uploadId?: string,
 }

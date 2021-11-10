@@ -30,7 +30,7 @@ export class FileUpload  {
 
   // aws config and file references
   public fileKey:string;
-  private uploadId:string | null | undefined;
+  public uploadId:string | undefined;
   config: MailioEvaporateConfig;
   public status: UploadStatus;
   public file:File;
@@ -45,7 +45,6 @@ export class FileUpload  {
     this.config = config;
     this.fileKey = decodeURIComponent(`${config.bucket}/${file.name}`);
     this.file = file;
-    this.uploadId = null;
     this.totalFileSizeBytes = file.size;
     this.partsOnS3 = [];
     this.startTime = new Date();
@@ -118,6 +117,7 @@ export class FileUpload  {
         error: (this.reason instanceof Error) ? this.reason : undefined,
         message: (this.reason instanceof Error) ? undefined : this.reason,
         status: this.status,
+        uploadId: this.uploadId,
       };
       this.uploadStats.next(stats);
       return stats;
@@ -137,6 +137,8 @@ export class FileUpload  {
       fileSize: this.totalFileSizeBytes,
       progress: this.bytesUploadedUntilNow / this.totalFileSizeBytes,
       status: this.status,
+      uploadId: this.uploadId,
+      message: (this.reason instanceof Error) ? undefined : this.reason,
     };
 
     if (avgSpeed > 0) {
@@ -150,7 +152,7 @@ export class FileUpload  {
    * Start file upload
    * @returns
    */
-  async start(): Promise<void> {
+  async start(): Promise<string> {
     this.status = UploadStatus.EVAPORATING;
     this.startMonitor();
 
@@ -162,15 +164,19 @@ export class FileUpload  {
     const multipartUpload = new CreateMultipartUploadCommand(params);
     try {
       const comm:CreateMultipartUploadCommandOutput = await this.s3client.send(multipartUpload);
-      const id = comm.UploadId;
-      this.uploadId = id;
-      this.events.next({ type: UploadStatus.START, payload: "started" });
-      // return id;
-    } catch (err) {
+      this.uploadId = comm.UploadId;
+      if (!comm.UploadId) {
+        this.events.next({ type: UploadStatus.ERROR, payload: "No upload id" });
+        throw new Error('No upload id');
+      } else {
+        this.events.next({ type: UploadStatus.START, payload: "started" });
+        return comm.UploadId;
+      }
+    } catch (err:any) {
       console.error(err);
       this.events.next({ type: UploadStatus.ERROR, payload: err });
+      throw err;
     }
-    // return undefined;
   }
 
   async uploadPart(filePart:ArrayBuffer): Promise<void> {
@@ -329,7 +335,7 @@ export class FileUpload  {
     this.events.unsubscribe();
     this.partsOnS3 = [];
     this.partNumber = 0;
-    this.uploadId = null;
+    this.uploadId = undefined;
     this.totalFileSizeBytes = 0;
     this.status = UploadStatus.DONE;
     this.bytesUploadedUntilNow = 0;

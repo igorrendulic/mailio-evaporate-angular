@@ -12,9 +12,9 @@ describe('MailioEvaporateService', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       providers: [{provide: MAILIO_EVAPORATE_CONFIG, useValue: {
-        awsKey: '***REMOVED***',
-        secretKey: '***REMOVED***',
-        bucket: '***REMOVED***',
+        awsKey: 'mykey',
+        secretKey: 'mysecret',
+        bucket: 'mybucket',
         awsRegion: 'us-west-2',
         partSize: 5 * 1024 * 1024, // 5 Mb is minimun chunk size
       }}]
@@ -51,11 +51,14 @@ describe('MailioEvaporateService', () => {
             let part = new Uint8Array(body!);
             const blob = new Blob([part]);
             const file = new File([blob], 'Large-Sample-png-Image-download-for-Testing.png', {type: 'image/png'});
-            const fileUpload = new FileUpload(file, service.s3client, service.config);
-            fileUpload.uploadStats$.subscribe(stats => {
-              console.log('upload stats: ', stats);
+            // add listener to the file upload
+            service.uploadProgress$.subscribe(progress => {
+              console.log('progress: ', progress);
             });
-            fileUpload.start();
+            // add file to queue for upload
+            service.add(file).then(() => {
+              console.log('succesfully added to queue');
+            });
           });
 
         } else {
