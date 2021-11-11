@@ -27,6 +27,7 @@
         "test": {
           "builder": "@angular-devkit/build-angular:karma",
           "options": {
+            "codeCoverage": true,
             "main": "projects/mailio-evaporate/src/test.ts",
             "tsConfig": "projects/mailio-evaporate/tsconfig.spec.json",
             "karmaConfig": "projects/mailio-evaporate/karma.conf.js"

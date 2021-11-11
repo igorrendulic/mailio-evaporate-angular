@@ -1,21 +1,42 @@
-import { async, TestBed, waitForAsync } from '@angular/core/testing';
+import { TestBed, waitForAsync } from '@angular/core/testing';
 import { MAILIO_EVAPORATE_CONFIG } from './config';
 
 import { MailioEvaporateService } from './mailio-evaporate.service';
-import { MailioEvaporateConfig } from './models/MailioEvaporateConfig';
-import { FileUpload } from './Upload/FileUpload';
 import { s3EncodedObjectName } from './Utils/Utils';
+
+interface environemntVariables {
+  AWS_ACCESS_KEY_ID: string;
+  AWS_SECRET_ACCESS_KEY: string;
+  AWS_REGION: string;
+  AWS_BUCKET: string;
+}
 
 describe('MailioEvaporateService', () => {
   let service: MailioEvaporateService;
 
   beforeEach(() => {
+    var request = new XMLHttpRequest();
+    request.open('GET', '/base/env.json', false);  // `false` makes the request synchronous
+    request.send(null);
+
+    let envs:environemntVariables = {
+      AWS_ACCESS_KEY_ID: '',
+      AWS_SECRET_ACCESS_KEY: '',
+      AWS_REGION: '',
+      AWS_BUCKET: ''
+    }
+
+    if (request.status === 200) {
+      let envVars = request.responseText;
+      envs = JSON.parse(envVars);
+    }
+
     TestBed.configureTestingModule({
       providers: [{provide: MAILIO_EVAPORATE_CONFIG, useValue: {
-        awsKey: 'mykey',
-        secretKey: 'mysecret',
-        bucket: 'mybucket',
-        awsRegion: 'us-west-2',
+        awsKey: envs.AWS_ACCESS_KEY_ID,
+        secretKey: envs.AWS_SECRET_ACCESS_KEY,
+        bucket: envs.AWS_BUCKET,
+        awsRegion: envs.AWS_REGION,
         partSize: 5 * 1024 * 1024, // 5 Mb is minimun chunk size
       }}]
     });

@@ -11,7 +11,7 @@ module.exports = function (config) {
       require('karma-chrome-launcher'),
       require('karma-jasmine-html-reporter'),
       require('karma-coverage'),
-      require('@angular-devkit/build-angular/plugins/karma')
+      require('@angular-devkit/build-angular/plugins/karma'),
     ],
     client: {
       jasmine: {
@@ -20,7 +20,8 @@ module.exports = function (config) {
         // for example, you can disable the random execution with `random: false`
         // or set a specific seed with `seed: 4321`
       },
-      clearContext: false // leave Jasmine Spec Runner output visible in browser
+      clearContext: false, // leave Jasmine Spec Runner output visible in browser
+      arguments: ['TEST:1', 'TEST:2'],
     },
     jasmineHtmlReporter: {
       suppressAll: true // removes the duplicated traces
@@ -48,6 +49,12 @@ module.exports = function (config) {
         served: true,
         included: false,
         nocache: false
+      },
+      {
+        pattern: 'env.json',
+        watched: true,
+        served: true,
+        included: false,
       }
     ],
   });
