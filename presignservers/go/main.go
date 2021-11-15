@@ -18,11 +18,8 @@ import (
 )
 
 const (
-	authHeaderPrefix  = "AWS4-HMAC-SHA256"
-	timeFormat        = "20060102T150405Z"
-	shortTimeFormat   = "20060102"
-	awsV4Request      = "aws4_request"
-	emptyStringSHA256 = `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
+	shortTimeFormat = "20060102"
+	awsV4Request    = "aws4_request"
 )
 
 // var db = make(map[string]string)
