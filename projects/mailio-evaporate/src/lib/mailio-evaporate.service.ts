@@ -1,11 +1,15 @@
 import { Inject, Injectable } from '@angular/core';
+import { Sha256 } from '@aws-crypto/sha256-js';
 import { ListMultipartUploadsCommand, ListMultipartUploadsCommandInput, MultipartUpload, S3Client, S3ClientConfig } from '@aws-sdk/client-s3';
 import { Observable, Subject } from 'rxjs';
 import { MAILIO_EVAPORATE_CONFIG } from './config';
 import { EvaporateProgress } from './models/EvaporateProgress';
 import { MailioEvaporateConfig, validateConfig } from './models/MailioEvaporateConfig';
+import { awsSignatureV4AuthMiddleware } from './awsAuthPlugin/AWSSignatureV4AuthMiddleware';
 import { FileUpload } from './Upload/FileUpload';
 import { s3EncodedObjectName } from './Utils/Utils';
+import { MailioAWSSignatureV4 } from './awsAuthPlugin/MailioAwsSignatureV4';
+
 
 @Injectable({
   providedIn: 'root'
@@ -16,6 +20,7 @@ export class MailioEvaporateService {
   config: MailioEvaporateConfig;
   queue:File[];
   s3client: S3Client;
+  awsV4Signer: MailioAWSSignatureV4;
 
   // progress
   public uploadProgress$:Observable<EvaporateProgress>;
@@ -37,12 +42,24 @@ export class MailioEvaporateService {
     const s3Config:S3ClientConfig = {
       credentials: {
         accessKeyId: config.awsKey,
-        secretAccessKey: config.secretKey ? config.secretKey : '',
+        secretAccessKey: 'abcdef',
       },
       region: config.awsRegion,
     };
     const awsclient = new S3Client(s3Config);
     this.s3client = awsclient;
+
+    const signerInit = {
+      service: config.awsService,
+      region: config.awsRegion,
+      sha256: Sha256,
+      credentials: {
+        accessKeyId: config.awsKey,
+        secretAccessKey: 'notimportantsecretheresiceweregoingtoserver',
+      },
+    };
+    this.awsV4Signer = new MailioAWSSignatureV4(signerInit);
+    this.s3client.middlewareStack.add(awsSignatureV4AuthMiddleware(this.awsV4Signer), { step: 'finalizeRequest', priority: 'high', name: 'mailioAuthPlugin' });
   }
 
   /**
@@ -100,6 +117,7 @@ export class MailioEvaporateService {
       };
       const fileName:string = s3EncodedObjectName(file.name);
       const fileToUpload:File = new File([file], fileName, {type: file.type});
+
       const fileUpload = new FileUpload(fileToUpload, this.s3client, this.config);
       fileUpload.start().then((uploadId:string) => {
         fileUpload.uploadStats$.subscribe((stats) => {

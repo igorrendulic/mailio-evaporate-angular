@@ -209,6 +209,7 @@ export class FileUpload  {
       };
 
       const uploadPart = new UploadPartCommand(uploadPartInput);
+
       this.s3client.send(uploadPart).then((response:UploadPartCommandOutput) => {
 
         if (response.$metadata.httpStatusCode === 200) {

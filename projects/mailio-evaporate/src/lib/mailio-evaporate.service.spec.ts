@@ -3,6 +3,11 @@ import { MAILIO_EVAPORATE_CONFIG } from './config';
 
 import { MailioEvaporateService } from './mailio-evaporate.service';
 import { s3EncodedObjectName } from './Utils/Utils';
+import { HttpRequest } from "@aws-sdk/protocol-http";
+import { MailioEvaporateConfig } from './models/MailioEvaporateConfig';
+import { SignatureV4 } from '@aws-sdk/signature-v4';
+import { Sha256 } from '@aws-crypto/sha256-js';
+import { MailioAWSSignatureV4 } from './awsAuthPlugin/MailioAwsSignatureV4';
 
 interface environemntVariables {
   AWS_ACCESS_KEY_ID: string;
@@ -10,6 +15,24 @@ interface environemntVariables {
   AWS_REGION: string;
   AWS_BUCKET: string;
 }
+
+const minimalRequest = new HttpRequest({
+  method: "POST",
+  protocol: "https:",
+  path: "/",
+  headers: {
+    host: "foo.us-bar-1.amazonaws.com",
+  },
+  hostname: "foo.us-bar-1.amazonaws.com",
+});
+
+const httpRequestOptions = {
+  method: "POST",
+  protocol: "https:",
+  path: "/",
+  headers: {},
+  hostname: "foo.us-east-1.amazonaws.com",
+};
 
 describe('MailioEvaporateService', () => {
   let service: MailioEvaporateService;
@@ -24,7 +47,7 @@ describe('MailioEvaporateService', () => {
       AWS_SECRET_ACCESS_KEY: '',
       AWS_REGION: '',
       AWS_BUCKET: ''
-    }
+    };
 
     if (request.status === 200) {
       let envVars = request.responseText;
@@ -38,6 +61,7 @@ describe('MailioEvaporateService', () => {
         bucket: envs.AWS_BUCKET,
         awsRegion: envs.AWS_REGION,
         partSize: 5 * 1024 * 1024, // 5 Mb is minimun chunk size
+        awsService: 's3',
       }}]
     });
     service = TestBed.inject(MailioEvaporateService);
@@ -90,4 +114,31 @@ describe('MailioEvaporateService', () => {
       });
     }
   ));
+
+  it('validate aws v4 signature', waitForAsync(async () => {
+    const presigningOptions = {
+      expiresIn: 1800,
+      signingDate: new Date("2000-01-01T00:00:00.000Z"),
+    };
+    const signerInit = {
+      service: "foo",
+      region: "us-bar-1",
+      sha256: Sha256,
+      credentials: {
+        accessKeyId: "foo",
+        secretAccessKey: "bar",
+      },
+    };
+    const mailioSigner = new MailioAWSSignatureV4(signerInit);
+    const signer = new SignatureV4(signerInit);
+    const originalRequest = await signer.sign(minimalRequest, presigningOptions);
+    const mailioRequest = await mailioSigner.signAwsRequest(minimalRequest, presigningOptions);
+
+    expect(originalRequest.headers).toBeTruthy();
+    expect(mailioRequest.headers).toBeTruthy();
+
+    expect(originalRequest.headers['Authorization']).toEqual(mailioRequest.headers['Authorization']);
+
+  }));
+
 });

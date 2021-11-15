@@ -5,10 +5,12 @@ export interface MailioEvaporateConfig {
   retryBackoffPower?: number,
   maxRetryBackoffSecs?: number,
   progressIntervalMS?: number,
+  presignUrl: string,
   awsKey: string,
-  secretKey?:string,
-  awsRegion?: string,
+  awsRegion: string,
   abortCompletionThrottlingMs?: number,
+  timeOffsetMs?: number,
+  awsService: string,
 }
 
 /**
