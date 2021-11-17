@@ -62,6 +62,7 @@ describe('MailioEvaporateService', () => {
         awsRegion: envs.AWS_REGION,
         partSize: 5 * 1024 * 1024, // 5 Mb is minimun chunk size
         awsService: 's3',
+        maxConcurrentParts: 2,
       }}]
     });
     service = TestBed.inject(MailioEvaporateService);

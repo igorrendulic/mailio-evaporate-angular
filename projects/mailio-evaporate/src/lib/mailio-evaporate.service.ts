@@ -128,11 +128,6 @@ export class MailioEvaporateService {
         console.error(err);
         reject(err);
       });
-        // console.log('got the upload id: ', uploadId);
-        // if (uploadId) {
-        //   this.queue.push(fileToUpload);
-        //   this.pendingFiles[fileUpload.fileKey] = fileUpload;
-        // }
     });
   }
 }
