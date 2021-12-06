@@ -1,3 +1,5 @@
+import { fromEvent, merge, Observable, Observer } from "rxjs";
+import { map } from "rxjs/operators";
 import { S3_EXTRA_ENCODED_CHARS } from "../Constants";
 
 /**
@@ -129,3 +131,18 @@ export function toHex(bytes: Uint8Array): string {
 export const isArrayBuffer = (arg: any): arg is ArrayBuffer =>
   (typeof ArrayBuffer === "function" && arg instanceof ArrayBuffer) ||
   Object.prototype.toString.call(arg) === "[object ArrayBuffer]";
+
+/**
+ * Check if there is internet connection
+ * @returns Observable boolean (true online, false offline)
+ */
+export const hasInternetConnection = (): Observable<boolean> => {
+    return merge<boolean>(
+      fromEvent(window, 'offline').pipe(map(() => false)),
+      fromEvent(window, 'online').pipe(map(() => true)),
+      new Observable((sub: Observer<boolean>) => {
+        sub.next(navigator.onLine);
+        sub.complete();
+      })
+    );
+};

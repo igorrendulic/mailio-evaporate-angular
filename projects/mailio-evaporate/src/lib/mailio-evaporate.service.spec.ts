@@ -4,7 +4,6 @@ import { MAILIO_EVAPORATE_CONFIG } from './config';
 import { MailioEvaporateService } from './mailio-evaporate.service';
 import { s3EncodedObjectName } from './Utils/Utils';
 import { HttpRequest } from "@aws-sdk/protocol-http";
-import { MailioEvaporateConfig } from './models/MailioEvaporateConfig';
 import { SignatureV4 } from '@aws-sdk/signature-v4';
 import { Sha256 } from '@aws-crypto/sha256-js';
 import { MailioAWSSignatureV4 } from './awsAuthPlugin/MailioAwsSignatureV4';
@@ -62,7 +61,13 @@ describe('MailioEvaporateService', () => {
         awsRegion: envs.AWS_REGION,
         partSize: 5 * 1024 * 1024, // 5 Mb is minimun chunk size
         awsService: 's3',
-        maxConcurrentParts: 2,
+        maxConcurrentParts: 1,
+        transformPart: (part:ArrayBuffer) => {
+          return new Promise<ArrayBuffer>((resolve, reject) => {
+            console.log('transformer called: ', part);
+            resolve(part);
+          });
+        }
       }}]
     });
     service = TestBed.inject(MailioEvaporateService);
@@ -101,10 +106,24 @@ describe('MailioEvaporateService', () => {
             service.uploadProgress$.subscribe(progress => {
               console.log('progress: ', progress);
             });
-            // add file to queue for upload
-            service.add(file).then(() => {
+
+            service.add(file).then((uploadId:string) => {
               console.log('succesfully added to queue');
-            });
+              setTimeout(() => {
+                service.pause(uploadId).then(() => {
+                  console.log('paused with upload id: ', uploadId);
+                });
+              }, 300);
+
+              setTimeout(() => {
+                service.resume(uploadId).then(() => {
+                  console.log('resumed with upload id: ', uploadId);
+                });
+              }, 5000);
+            }).catch(err => {
+              console.error(err);
+              throw new Error(err);
+            });;
           });
 
         } else {

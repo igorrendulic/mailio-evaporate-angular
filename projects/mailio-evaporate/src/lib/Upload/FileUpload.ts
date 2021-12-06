@@ -1,53 +1,86 @@
-import { S3Client, CreateMultipartUploadCommand, CreateMultipartUploadCommandInput, UploadPartCommand, UploadPartCommandInput, ListMultipartUploadsCommand, ListMultipartUploadsCommandInput, CreateMultipartUploadCommandOutput, CompleteMultipartUploadCommandInput, CompleteMultipartUploadCommand, CompleteMultipartUploadCommandOutput, MultipartUpload, AbortMultipartUploadCommandInput, AbortMultipartUploadCommand, AbortMultipartUploadCommandOutput, UploadPartCommandOutput, CompletedPart } from '@aws-sdk/client-s3';
-import { forkJoin, from, merge, Observable, Subject } from 'rxjs';
+import {
+  S3Client,
+  CreateMultipartUploadCommand,
+  CreateMultipartUploadCommandInput,
+  UploadPartCommand,
+  UploadPartCommandInput,
+  CreateMultipartUploadCommandOutput,
+  CompleteMultipartUploadCommandInput,
+  CompleteMultipartUploadCommand,
+  CompleteMultipartUploadCommandOutput,
+  MultipartUpload,
+  AbortMultipartUploadCommandInput,
+  AbortMultipartUploadCommand,
+  AbortMultipartUploadCommandOutput,
+  UploadPartCommandOutput,
+  CompletedPart,
+} from '@aws-sdk/client-s3';
+import { from, merge, Observable, of, Subject } from 'rxjs';
 import * as SparkMD5 from 'spark-md5';
 import { FileChunk } from '../models/FileChunk';
 import { InternalEvent } from '../models/InternalEvent';
-import { MailioEvaporateConfig } from "../models/MailioEvaporateConfig";
-import { UploadStatus } from "../models/UploadConstants";
-import { UploadStats } from "../models/UploadStats";
-import { base64ToHex, readableFileSize } from "../Utils/Utils";
-import { mergeMap, takeUntil, tap } from 'rxjs/operators';
+import { MailioEvaporateConfig } from '../models/MailioEvaporateConfig';
+import { UploadStatus } from '../models/UploadConstants';
+import { UploadStats } from '../models/UploadStats';
+import { base64ToHex, readableFileSize } from '../Utils/Utils';
+import {
+  bufferToggle,
+  catchError,
+  distinctUntilChanged,
+  filter,
+  mergeMap,
+  retry,
+  share,
+  windowToggle,
+} from 'rxjs/operators';
 
-export class FileUpload  {
-
+export class FileUpload {
   // s3 client
-  private s3client:S3Client;
+  private s3client: S3Client;
 
   // observable monitoring for file upload
-  public uploadStats$:Observable<UploadStats>;
+  public uploadStats$: Observable<UploadStats>;
 
   // upload stats
-  private uploadStats:Subject<UploadStats>;
+  private uploadStats: Subject<UploadStats>;
   private reason?: any; // can be Error if upload failed or reason for the status
   bytesUploadedUntilNow:number = 0;
   totalFileSizeBytes: number = 0;
 
   // internal events
-  private events:Subject<InternalEvent>;
+  private events: Subject<InternalEvent>;
 
   // list of completed parts uploads
-  // private partsOnS3:CompletedPart[];
-  private fileChunkQueue: Subject<FileChunk>;
-  private partsInProgress:FileChunk[] = [];
+  private partsInProgress: FileChunk[] = [];
   private completedChunks: CompletedPart[];
-  private stopUpload$: Subject<boolean>;
-  private partNumber:number = 0;
+  private partNumber: number = 0;
   private totalNumberOfChunks: number = 0;
 
+  // File upload Subjects and Observables
+  // pausing and resuming a file upload queue (buffered pausable observable)
+  // read more at: https://igor.technology/rxjs-pause-resume/
+  private fileChunkQueue: Subject<FileChunk>;
+  private pause: Subject<boolean> = new Subject();
+  private pause$: Observable<boolean> = this.pause.pipe(
+    distinctUntilChanged(),
+    share()
+  );
+  private pauseOn$: Observable<boolean> = this.pause$.pipe(filter((v) => !v));
+  private pauseOff$: Observable<boolean> = this.pause$.pipe(filter((v) => !!v));
+
   // aws config and file references
-  public fileKey:string;
-  public uploadId:string | undefined;
+  public fileKey: string;
+  public uploadId: string | undefined;
   config: MailioEvaporateConfig;
   public status: UploadStatus;
-  public file:File;
+  public file: File;
   private sparkMd5;
 
   // Progress and Stats
-  private progressInterval:any;
-  private startTime:Date | undefined;
+  private progressInterval: any;
+  private startTime: Date | undefined;
 
-  constructor(file: File, awsclient:S3Client, config: MailioEvaporateConfig) {
+  constructor(file: File, awsclient: S3Client, config: MailioEvaporateConfig) {
     // init
     this.config = config;
     this.fileKey = decodeURIComponent(`${config.bucket}/${file.name}`);
@@ -56,7 +89,6 @@ export class FileUpload  {
     this.completedChunks = [];
     this.totalNumberOfChunks = 0;
     this.fileChunkQueue = new Subject<FileChunk>();
-    this.stopUpload$ = new Subject<boolean>();
     this.startTime = new Date();
     this.status = UploadStatus.PENDING;
     this.events = new Subject();
@@ -68,7 +100,7 @@ export class FileUpload  {
     this.s3client = awsclient;
 
     // handling internal FileUpload events
-    this.events.subscribe((event:InternalEvent) => {
+    this.events.subscribe((event: InternalEvent) => {
       // console.log('internal event: ', event);
       this.reason = event.payload;
       switch (event.type) {
@@ -101,50 +133,62 @@ export class FileUpload  {
           this.done();
           break;
         default:
-        break;
+          break;
       }
     });
-    this.fileChunkQueue.pipe(
 
-      mergeMap((fileChunk:FileChunk) => {
+    const uploadPipe: Observable<FileChunk> = this.fileChunkQueue.pipe(
+      mergeMap((fileChunk: FileChunk) => {
         return from(this.uploadPart(fileChunk));
       }, this.config.maxConcurrentParts),
+      retry(3), // retry 3 times on error
+    );
 
-    ).subscribe((chunk:FileChunk) => {
-      const foundindex = this.partsInProgress.findIndex((queued:FileChunk) => queued.partNumber === chunk.partNumber);
-      if (foundindex >= 0) { // chunk found in progress queue
+    const uploadPipeObserver: Observable<FileChunk> = merge(
+      uploadPipe.pipe(
+        bufferToggle(this.pauseOff$, () => this.pauseOn$),
+        mergeMap((x) => x)
+      ),
+      uploadPipe.pipe(
+        windowToggle(this.pauseOn$, () => this.pauseOff$),
+        mergeMap((x) => x)
+      )
+    ).pipe(
+      catchError((err) => {
+        console.error(err);
+        return of(err);
+      })
+    );
+
+    // subscribe to upload pipe
+    // removes the chunks from upload queue and places completedPart in completedChunks
+    // when partsInProgress is empty, the upload is complete
+    uploadPipeObserver.subscribe((chunk: FileChunk) => {
+      const foundindex = this.partsInProgress.findIndex(
+        (queued: FileChunk) => queued.partNumber === chunk.partNumber
+      );
+      if (foundindex >= 0) {
+        // chunk found in progress queue
         this.completedChunks.push(chunk.completedPart);
+        this.bytesUploadedUntilNow += chunk.chunk.byteLength;
         this.partsInProgress.splice(foundindex, 1);
+        this.events.next({
+          type: UploadStatus.EVAPORATING,
+          payload: 'evaporating'
+        })
       }
       if (this.partsInProgress.length === 0) {
-        console.log('completed chunks, completing: ', this.completedChunks);
-        this.events.next({type: UploadStatus.COMPLETE, payload: 'upload complete'});
+        this.events.next({
+          type: UploadStatus.COMPLETE,
+          payload: 'upload complete',
+        });
       }
     });
 
-    // this.fileChunkQueue.pipe(
-    //   takeUntil(
-    //     merge([
-    //       this.stopUpload$,
-    //       mergeMap((fileChunk:FileChunk) => {
-    //         return from(this.uploadPart(fileChunk));
-    //       }, this.config.maxConcurrentParts),
-    //       ]
-    //     )
-    //   )
-    // ).subscribe((chunk:FileChunk) => {
-    //   const foundindex = this.partsInProgress.findIndex((queued:FileChunk) => queued.partNumber === chunk.partNumber);
-    //   if (foundindex >= 0) { // chunk found in progress queue
-    //     this.completedChunks.push(chunk.completedPart);
-    //     this.partsInProgress.splice(foundindex, 1);
-    //   }
-    //   if (this.partsInProgress.length === 0) {
-    //     console.log('completed chunks, completing: ', this.completedChunks);
-    //     this.events.next({type: UploadStatus.COMPLETE, payload: 'upload complete'});
-    //   }
-    // });
+    // init pauser
+    this.pause.next(true);
+    this.pause.next(false);
   }
-
 
   /**
    * Upload stats for this file
@@ -154,17 +198,20 @@ export class FileUpload  {
   _progressStats(): UploadStats {
     // Adapted from https://github.com/fkjaekel
     // https://github.com/TTLabs/EvaporateJS/issues/13
-    if (this.bytesUploadedUntilNow === 0) {
-      const stats:UploadStats =  {
+
+    if (
+      this.bytesUploadedUntilNow === 0
+    ) {
+      const stats: UploadStats = {
         fileSize: this.file.size,
-        readableSpeed: "0.00 KB/s",
+        readableSpeed: '0.00 KB/s',
         remainingSize: 0,
         secondsLeft: 0,
         speed: 0,
         progress: 0,
         totalUploaded: 0,
-        error: (this.reason instanceof Error) ? this.reason : undefined,
-        message: (this.reason instanceof Error) ? undefined : this.reason,
+        error: this.reason instanceof Error ? this.reason : undefined,
+        message: this.reason instanceof Error ? undefined : this.reason,
         status: this.status,
         uploadId: this.uploadId,
       };
@@ -172,12 +219,16 @@ export class FileUpload  {
       return stats;
     }
 
-    // console.log('total uploaded: ', this.bytesUploadedUntilNow);
-    let delta = (new Date().getTime() - (this.startTime?.getTime() || 0)) / 1000;
+    console.log('bytes uploaded until now: ', this.bytesUploadedUntilNow);
+
+    let delta =
+      (new Date().getTime() - (this.startTime?.getTime() || 0)) / 1000;
     let avgSpeed = this.bytesUploadedUntilNow / delta;
     let remainingSize = this.totalFileSizeBytes - this.bytesUploadedUntilNow;
 
-    const stats:UploadStats = {
+    console.log('delta: ', delta);
+
+    const stats: UploadStats = {
       speed: avgSpeed,
       readableSpeed: readableFileSize(avgSpeed),
       totalUploaded: this.bytesUploadedUntilNow,
@@ -187,11 +238,12 @@ export class FileUpload  {
       progress: this.bytesUploadedUntilNow / this.totalFileSizeBytes,
       status: this.status,
       uploadId: this.uploadId,
-      message: (this.reason instanceof Error) ? undefined : this.reason,
+      message: this.reason instanceof Error ? undefined : this.reason,
     };
 
     if (avgSpeed > 0) {
-      stats.secondsLeft = Math.round(remainingSize / avgSpeed);
+      const sl = Math.round(remainingSize / avgSpeed);
+      stats.secondsLeft = sl > 0 ? sl : 0;
     }
     this.uploadStats.next(stats);
     return stats;
@@ -205,68 +257,63 @@ export class FileUpload  {
     this.status = UploadStatus.EVAPORATING;
     this.startMonitor();
 
-    const params:CreateMultipartUploadCommandInput = {
+    const params: CreateMultipartUploadCommandInput = {
       Bucket: this.config.bucket,
       Key: this.file.name,
       ContentType: this.file.type,
-    }
+    };
     const multipartUpload = new CreateMultipartUploadCommand(params);
     try {
-      const comm:CreateMultipartUploadCommandOutput = await this.s3client.send(multipartUpload);
+      const comm: CreateMultipartUploadCommandOutput = await this.s3client.send(
+        multipartUpload
+      );
       this.uploadId = comm.UploadId;
       if (!comm.UploadId) {
-        this.events.next({ type: UploadStatus.ERROR, payload: "No upload id" });
+        this.events.next({ type: UploadStatus.ERROR, payload: 'No upload id' });
         throw new Error('No upload id');
       } else {
-        this.events.next({ type: UploadStatus.START, payload: "started" });
+        this.events.next({ type: UploadStatus.START, payload: 'started' });
         return comm.UploadId;
       }
-    } catch (err:any) {
+    } catch (err: any) {
       console.error(err);
       this.events.next({ type: UploadStatus.ERROR, payload: err });
       throw err;
     }
   }
 
-  async uploadPart(fileChunk:FileChunk): Promise<FileChunk> {
+  async uploadPart(fileChunk: FileChunk): Promise<FileChunk> {
     return new Promise<FileChunk>((resolve, reject) => {
       if (this.uploadId != null) {
-
-        const uploadPartInput:UploadPartCommandInput = {
+        const uploadPartInput: UploadPartCommandInput = {
           Key: this.file.name,
           Bucket: this.config.bucket,
           UploadId: this.uploadId,
           PartNumber: fileChunk.partNumber,
-          Body: new Blob([new Uint8Array(fileChunk.chunk, 0, fileChunk.chunk.byteLength)]),
+          Body: new Blob([
+            new Uint8Array(fileChunk.chunk, 0, fileChunk.chunk.byteLength),
+          ]),
           ContentLength: fileChunk.chunk.byteLength,
           ContentMD5: fileChunk.ContentMD5,
         };
 
         const uploadPart = new UploadPartCommand(uploadPartInput);
 
-        this.s3client.send(uploadPart).then((response:UploadPartCommandOutput) => {
-
-          if (response.$metadata.httpStatusCode === 200) {
-            // this.partsOnS3.push({ETag: etag, PartNumber: currentPartNumber});
-            this.bytesUploadedUntilNow += fileChunk.chunk.byteLength;
-
-            if (this.totalFileSizeBytes - this.bytesUploadedUntilNow > 0) {
-              this.events.next({ type: UploadStatus.EVAPORATING, payload: response });
+        this.s3client
+          .send(uploadPart)
+          .then((response: UploadPartCommandOutput) => {
+            if (response.$metadata.httpStatusCode === 200) {
+              fileChunk.status = UploadStatus.COMPLETE;
+              resolve(fileChunk);
             } else {
-              // this.events.next({ type: UploadStatus.COMPLETE, payload: response });
+              console.error('failed upload of a chunk', response);
+              reject(response);
             }
-            fileChunk.status = UploadStatus.COMPLETE;
-            resolve(fileChunk);
-          } else {
-            console.error('failed upload of a chunk', response);
-            // this.events.next({ type: UploadStatus.ERROR, payload: response });
-            reject(response);
-          }
-        }).catch((err:any) => {
-          console.error(err);
-          // this.events.next({ type: UploadStatus.ERROR, payload: err });
-          reject(err);
-        });
+          })
+          .catch((err: any) => {
+            console.error(err);
+            reject(err);
+          });
       }
     });
   }
@@ -277,17 +324,22 @@ export class FileUpload  {
    * @param file File (input file)
    */
   async uploadParts() {
-
-    let i:number = 0;
-    this.stopUpload$.next(true);
-    const chunk = this.config.partSize || (5 * 1024 * 1024);
-    this.totalNumberOfChunks = Math.ceil(this.file.size / (this.config.partSize || (5 * 1024 * 1024)));
+    let i: number = 0;
+    const chunk = this.config.partSize || 5 * 1024 * 1024;
+    this.totalNumberOfChunks = Math.ceil(
+      this.file.size / (this.config.partSize || 5 * 1024 * 1024)
+    );
+    let isLastChunk:boolean = false;
+    let isFirstChunk:boolean = true;
     while (i < this.file.size) {
       const start = i;
       const end = i + chunk;
+      if (end >= this.file.size) {
+        isLastChunk = true;
+      }
       const part = this.file.slice(start, end);
       i += chunk;
-      const filePart:ArrayBuffer = await part.arrayBuffer();
+      const filePart: ArrayBuffer = await part.arrayBuffer();
 
       // calculate md5, increase part number and prepare ETag, PartNumber for CompletedPart
       let md5Content = undefined;
@@ -299,42 +351,61 @@ export class FileUpload  {
 
       const currentPartNumber = this.partNumber;
 
-      const chunkComplete:CompletedPart = {
-        ETag: '\"' + base64ToHex(md5Content) + '\"',
+      const chunkComplete: CompletedPart = {
+        ETag: '"' + base64ToHex(md5Content) + '"',
         PartNumber: currentPartNumber,
       };
-
-      const fileChunk:FileChunk = {
-        chunk: filePart,
+      const fileChunk: FileChunk = {
+        chunk: new ArrayBuffer(0),
         partNumber: currentPartNumber,
         completedPart: chunkComplete,
         status: UploadStatus.PENDING,
         ContentMD5: md5Content,
+      };
+
+      // if part transformation function is defined, transform the part
+      if (this.config.transformPart) {
+          const transformedPart = await this.config.transformPart(filePart, isFirstChunk, isLastChunk);
+          fileChunk.chunk = transformedPart;
+      } else {
+        fileChunk.chunk = filePart;
       }
+
+
       this.partsInProgress.push(fileChunk);
       this.fileChunkQueue.next(fileChunk);
+
+      isFirstChunk = false;
     }
   }
 
   completeUpload() {
-    if (this.completedChunks) {
-      this.completedChunks = this.completedChunks.sort((a, b) => ((a.PartNumber ? a.PartNumber : 0) - (b.PartNumber ? b.PartNumber : 0)));
-      console.log('ordered parts: ', this.completedChunks);
-      const completeMultipartUploadInput:CompleteMultipartUploadCommandInput = {
-        Bucket: this.config.bucket,
-        Key: this.file.name,
-        UploadId: this.uploadId!,
-        MultipartUpload: {
-          Parts: this.completedChunks,
-        },
-      };
-      const completeMultipartUpload = new CompleteMultipartUploadCommand(completeMultipartUploadInput);
-      this.s3client.send(completeMultipartUpload).then((response:CompleteMultipartUploadCommandOutput) => {
-        this.events.next({ type: UploadStatus.DONE, payload: response });
-      }).catch((err:any) => {
-        this.events.next({ type: UploadStatus.ERROR, payload: err });
-        console.error(err);
-      });
+    if (this.completedChunks.length > 0 && this.uploadId) {
+      this.completedChunks = this.completedChunks.sort(
+        (a, b) =>
+          (a.PartNumber ? a.PartNumber : 0) - (b.PartNumber ? b.PartNumber : 0)
+      );
+      const completeMultipartUploadInput: CompleteMultipartUploadCommandInput =
+        {
+          Bucket: this.config.bucket,
+          Key: this.file.name,
+          UploadId: this.uploadId!,
+          MultipartUpload: {
+            Parts: this.completedChunks,
+          },
+        };
+      const completeMultipartUpload = new CompleteMultipartUploadCommand(
+        completeMultipartUploadInput
+      );
+      this.s3client
+        .send(completeMultipartUpload)
+        .then((response: CompleteMultipartUploadCommandOutput) => {
+          this.events.next({ type: UploadStatus.DONE, payload: response });
+        })
+        .catch((err: any) => {
+          this.events.next({ type: UploadStatus.ERROR, payload: err });
+          console.error(err);
+        });
     }
   }
 
@@ -365,18 +436,21 @@ export class FileUpload  {
    */
   __abort(upload: MultipartUpload): Promise<boolean> {
     return new Promise((resolve, reject) => {
-      const abortInput:AbortMultipartUploadCommandInput = {
+      const abortInput: AbortMultipartUploadCommandInput = {
         Bucket: this.config.bucket,
         Key: this.file.name,
         UploadId: upload.UploadId,
       };
       const abortCommand = new AbortMultipartUploadCommand(abortInput);
-      this.s3client.send(abortCommand).then((response:AbortMultipartUploadCommandOutput) => {
-        resolve(true);
-      }).catch((err:any) => {
-        console.error(err);
-        reject(err);
-      });
+      this.s3client
+        .send(abortCommand)
+        .then((response: AbortMultipartUploadCommandOutput) => {
+          resolve(true);
+        })
+        .catch((err: any) => {
+          console.error(err);
+          reject(err);
+        });
     });
   }
 
@@ -392,21 +466,38 @@ export class FileUpload  {
       };
       return this.__abort(upload);
     }
-    return Promise.reject(new Error('failed to abort upload. File missing or upload never initiated'));
+    return Promise.reject(
+      new Error(
+        'failed to abort upload. File missing or upload never initiated'
+      )
+    );
+  }
+
+  pauseUpload() {
+    this.pause.next(true);
+  }
+
+  resumeUpload() {
+    this.pause.next(false);
   }
 
   done() {
     this._progressStats();
     this.s3client.destroy();
-    this.events.unsubscribe();
+    if (this.events) {
+      this.events.unsubscribe();
+    }
+    if (this.uploadStats) {
+      this.uploadStats.unsubscribe();
+    }
+    if (this.pause) {
+      this.pause.unsubscribe();
+    }
     this.completedChunks = [];
     this.partNumber = 0;
     this.uploadId = undefined;
     this.totalFileSizeBytes = 0;
     this.status = UploadStatus.DONE;
-    this.bytesUploadedUntilNow = 0;
-    this.uploadStats.unsubscribe();
     this.stopMonitor();
   }
-
 }

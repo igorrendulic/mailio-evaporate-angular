@@ -2,15 +2,12 @@ export interface MailioEvaporateConfig {
   maxConcurrentParts?: number,
   partSize?: number,
   bucket: string,
-  retryBackoffPower?: number,
-  maxRetryBackoffSecs?: number,
-  progressIntervalMS?: number,
   presignUrl: string,
   awsKey: string,
   awsRegion: string,
-  abortCompletionThrottlingMs?: number,
   timeOffsetMs?: number,
   awsService: string,
+  transformPart?: (part: ArrayBuffer, isFirst:boolean, isLast:boolean) => Promise<ArrayBuffer>
 }
 
 /**
@@ -30,20 +27,16 @@ export const validateConfig = (config: MailioEvaporateConfig): void  => {
   }
   if (!config.partSize) {
     config.partSize = 5 * 1024 * 1024; // 5MB
+  } else {
+    if (config.partSize < 5 * 1024 * 1024) {
+      throw new Error('The AWS "partSize" option must be at least 5MB.');
+    }
   }
+
   if (!config.maxConcurrentParts) {
     config.maxConcurrentParts = 5;
   }
-  if (!config.retryBackoffPower) {
-    config.retryBackoffPower = 2;
-  }
-  if (!config.maxRetryBackoffSecs) {
-    config.maxRetryBackoffSecs = 5;
-  }
   if (!config.awsRegion) {
     config.awsRegion = 'us-east-1';
-  }
-  if (!config.abortCompletionThrottlingMs) {
-    config.abortCompletionThrottlingMs = 1000;
   }
 };

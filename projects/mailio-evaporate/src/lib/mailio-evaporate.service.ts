@@ -18,7 +18,7 @@ export class MailioEvaporateService {
 
   // main evaporate structures
   config: MailioEvaporateConfig;
-  queue:File[];
+  queue:FileUpload[];
   s3client: S3Client;
   awsV4Signer: MailioAWSSignatureV4;
 
@@ -105,9 +105,9 @@ export class MailioEvaporateService {
    * Add file to the upload queue
    *
    * @param file File to upload
-   * @returns Promise (resolve or reject)
+   * @returns Promise (resolve or reject) with uploadId
    */
-  async add(file:File): Promise<void> {
+  async add(file:File): Promise<string> {
     return new Promise((resolve, reject) => {
       if (typeof file === 'undefined' || typeof file === 'undefined') {
         return reject('Missing file');
@@ -121,13 +121,48 @@ export class MailioEvaporateService {
       const fileUpload = new FileUpload(fileToUpload, this.s3client, this.config);
       fileUpload.start().then((uploadId:string) => {
         fileUpload.uploadStats$.subscribe((stats) => {
-          this.uploadProgress.next({stats, filename: fileName, uploadId: uploadId});
+            this.uploadProgress.next({stats, filename: fileName, uploadId: uploadId});
         });
-        resolve();
+        this.queue.push(fileUpload);
+        resolve(uploadId);
       }).catch(err => {
         console.error(err);
         reject(err);
       });
+    });
+  }
+
+  /**
+   * Pause a specific file upload by uploadId
+   * @param uploadId string
+   */
+  async pause(uploadId:string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const fileUpload = this.queue.find(fileUpload => fileUpload.uploadId === uploadId);
+      if (fileUpload) {
+        fileUpload.pauseUpload();
+        resolve();
+      } else {
+        reject('File with uploadId ' + uploadId + ' not found');
+      }
+    });
+  }
+
+  /**
+   * Resume a specific file upload by uploadId
+   * @param uploadId
+   * @returns
+   */
+  async resume(uploadId:string): Promise<void> {
+    console.log('resume called');
+    return new Promise((resolve, reject) => {
+      const fileUpload = this.queue.find(fileUpload => fileUpload.uploadId === uploadId);
+      if (fileUpload) {
+        fileUpload.resumeUpload();
+        resolve();
+      } else {
+        reject('File with uploadId ' + uploadId + ' not found');
+      }
     });
   }
 }
