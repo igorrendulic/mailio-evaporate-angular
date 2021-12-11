@@ -4,9 +4,11 @@ import { MAILIO_EVAPORATE_CONFIG } from './config';
 import { MailioEvaporateService } from './mailio-evaporate.service';
 import { s3EncodedObjectName } from './Utils/Utils';
 import { HttpRequest } from "@aws-sdk/protocol-http";
-import { SignatureV4 } from '@aws-sdk/signature-v4';
+import { SignatureV4, SignatureV4CryptoInit, SignatureV4Init } from '@aws-sdk/signature-v4';
 import { Sha256 } from '@aws-crypto/sha256-js';
 import { MailioAWSSignatureV4 } from './awsAuthPlugin/MailioAwsSignatureV4';
+import { MailioSignatureInit } from './awsAuthPlugin/mailioSignatureInit';
+import { rejects } from 'assert';
 
 interface environemntVariables {
   AWS_ACCESS_KEY_ID: string;
@@ -56,17 +58,21 @@ describe('MailioEvaporateService', () => {
     TestBed.configureTestingModule({
       providers: [{provide: MAILIO_EVAPORATE_CONFIG, useValue: {
         awsKey: envs.AWS_ACCESS_KEY_ID,
-        secretKey: envs.AWS_SECRET_ACCESS_KEY,
         bucket: envs.AWS_BUCKET,
         awsRegion: envs.AWS_REGION,
         partSize: 5 * 1024 * 1024, // 5 Mb is minimun chunk size
         awsService: 's3',
+        authServerUrl: 'http://localhost:8080/sign_auth',
         maxConcurrentParts: 1,
-        transformPart: (part:ArrayBuffer) => {
-          return new Promise<ArrayBuffer>((resolve, reject) => {
-            console.log('transformer called: ', part);
-            resolve(part);
-          });
+        transformPart: async (part:ArrayBuffer) => {
+          try {
+            const p = await new Promise<ArrayBuffer>((resolve) => {
+              console.log('transformer called: ', part);
+              resolve(part);
+            });
+          } catch (err) {
+            console.error(err);
+          }
         }
       }}]
     });
@@ -102,10 +108,7 @@ describe('MailioEvaporateService', () => {
             let part = new Uint8Array(body!);
             const blob = new Blob([part]);
             const file = new File([blob], 'Large-Sample-png-Image-download-for-Testing.png', {type: 'image/png'});
-            // add listener to the file upload
-            service.uploadProgress$.subscribe(progress => {
-              console.log('progress: ', progress);
-            });
+            //TODO: add listener to the file uploads
 
             service.add(file).then((uploadId:string) => {
               console.log('succesfully added to queue');
@@ -140,16 +143,25 @@ describe('MailioEvaporateService', () => {
       expiresIn: 1800,
       signingDate: new Date("2000-01-01T00:00:00.000Z"),
     };
-    const signerInit = {
+    const signerMailioInit: MailioSignatureInit = {
+      service: "foo",
+      region: "us-bar-1",
+      sha256: Sha256,
+      awsCredentials: {
+        accessKeyId: "foo",
+      },
+      authServerUrl: "http://localhost:8080/sign_auth",
+    };
+    const signerInit: SignatureV4Init & SignatureV4CryptoInit = {
       service: "foo",
       region: "us-bar-1",
       sha256: Sha256,
       credentials: {
         accessKeyId: "foo",
-        secretAccessKey: "bar",
-      },
-    };
-    const mailioSigner = new MailioAWSSignatureV4(signerInit);
+        secretAccessKey: ""
+      }
+    }
+    const mailioSigner = new MailioAWSSignatureV4(signerMailioInit);
     const signer = new SignatureV4(signerInit);
     const originalRequest = await signer.sign(minimalRequest, presigningOptions);
     const mailioRequest = await mailioSigner.signAwsRequest(minimalRequest, presigningOptions);

@@ -4,6 +4,7 @@ import { HttpRequest, HeaderBag, Credentials, Provider, HashConstructor, Request
 import { ALGORITHM_IDENTIFIER, AMZ_DATE_HEADER, AUTH_HEADER, SHA256_HEADER, TOKEN_HEADER } from '../Constants';
 import { toHex } from '../Utils/Utils';
 import { formatDate, getCanonicalHeaderList, hasHeader } from './awsSignatureV4Utils';
+import { AwsCredentials, MailioSignatureInit } from './mailioSignatureInit';
 
 export class MailioAWSSignatureV4 {
   private readonly service: string;
@@ -12,23 +13,33 @@ export class MailioAWSSignatureV4 {
   private readonly uriEscapePath: boolean;
   private readonly applyChecksum: boolean;
   private readonly sha256: HashConstructor;
-
+  private readonly authServerUrl: string;
+  private readonly awsCredentials: AwsCredentials;
 
   constructor({
     applyChecksum,
-    credentials,
     region,
     service,
     sha256,
-    uriEscapePath = true
-  }: SignatureV4Init & SignatureV4CryptoInit) {
+    authServerUrl,
+    awsCredentials,
+    uriEscapePath = true,
+  }: MailioSignatureInit) {
     this.service = service;
     this.uriEscapePath = uriEscapePath;
     // default to true if applyChecksum isn't set
     this.applyChecksum = typeof applyChecksum === "boolean" ? applyChecksum : true;
     this.regionProvider = normalizeRegionProvider(region);
-    this.credentialProvider = normalizeCredentialsProvider(credentials);
+    this.awsCredentials = awsCredentials;
+    const creds:Credentials = {
+      accessKeyId: awsCredentials.accessKeyId,
+      secretAccessKey: "removingthisisapointofthislibrary",
+      expiration: awsCredentials.expiration,
+      sessionToken: awsCredentials.sessionToken
+    }
+    this.credentialProvider = normalizeCredentialsProvider(creds);
     this.sha256 = sha256;
+    this.authServerUrl = authServerUrl;
   }
 
   async signAwsRequest(requestToSign:HttpRequest, {
@@ -58,7 +69,7 @@ export class MailioAWSSignatureV4 {
 
       const canonicalHeaders = getCanonicalHeaders(request, unsignableHeaders, signableHeaders);
       const stringToSign = await this.createStringToSign(longDate, scope, this.createCanonicalRequest(request, canonicalHeaders, payloadHash));
-      const signature = await this.authorize(signingService ?? this.service, region, shortDate, scope, stringToSign);
+      const signature = await this.authorize(this.authServerUrl, signingService ?? this.service, region, shortDate, scope, stringToSign);
 
       request.headers[AUTH_HEADER] =
       `${ALGORITHM_IDENTIFIER} ` +
@@ -128,10 +139,10 @@ ${toHex(hashedRequest)}`;
      * @param stringToSign
      * @returns
      */
-    private async authorize(service:string, region:string, shortDate:string, scope:string, stringToSign:string): Promise<string> {
+    private async authorize(authServerUrl: string, service:string, region:string, shortDate:string, scope:string, stringToSign:string): Promise<string> {
       return new Promise<string>((resolve, reject) => {
       var xhr = new XMLHttpRequest();
-        const signUrl = ["http://localhost:8080/sign_auth",
+        const signUrl = [authServerUrl,
         '?region=',encodeURIComponent(region),
         '&date=', encodeURIComponent(shortDate),
         '&scope=', encodeURIComponent(scope),

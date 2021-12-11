@@ -7,7 +7,8 @@ export interface MailioEvaporateConfig {
   awsRegion: string,
   timeOffsetMs?: number,
   awsService: string,
-  transformPart?: (part: ArrayBuffer, isFirst:boolean, isLast:boolean) => Promise<ArrayBuffer>
+  authServerUrl: string,
+  transformPart?: (part: ArrayBuffer, isFirstChunk?:boolean, isLastChunk?:boolean) => Promise<ArrayBuffer>
 }
 
 /**

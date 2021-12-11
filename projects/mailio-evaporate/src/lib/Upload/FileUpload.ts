@@ -17,11 +17,11 @@ import {
 } from '@aws-sdk/client-s3';
 import { from, merge, Observable, of, Subject } from 'rxjs';
 import * as SparkMD5 from 'spark-md5';
-import { FileChunk } from '../models/FileChunk';
-import { InternalEvent } from '../models/InternalEvent';
-import { MailioEvaporateConfig } from '../models/MailioEvaporateConfig';
-import { UploadStatus } from '../models/UploadConstants';
-import { UploadStats } from '../models/UploadStats';
+import { FileChunk } from '../Types/FileChunk';
+import { InternalEvent } from '../Types/InternalEvent';
+import { MailioEvaporateConfig } from '../Types/MailioEvaporateConfig';
+import { UploadStatus } from '../Types/UploadConstants';
+import { UploadStats } from '../Types/UploadStats';
 import { base64ToHex, readableFileSize } from '../Utils/Utils';
 import {
   bufferToggle,
@@ -76,14 +76,17 @@ export class FileUpload {
   public file: File;
   private sparkMd5;
 
-  // Progress and Stats
-  private progressInterval: any;
+  // Marking the startTime of the upload
   private startTime: Date | undefined;
 
-  constructor(file: File, awsclient: S3Client, config: MailioEvaporateConfig) {
+  constructor(awsclient: S3Client, config: MailioEvaporateConfig, file: File, fileSubPath?: string) {
     // init
     this.config = config;
-    this.fileKey = decodeURIComponent(`${config.bucket}/${file.name}`);
+    if (fileSubPath) {
+      this.fileKey = decodeURIComponent(`${config.bucket}/${fileSubPath}/${file.name}`);
+    } else {
+      this.fileKey = decodeURIComponent(`${config.bucket}/${file.name}`);
+    }
     this.file = file;
     this.totalFileSizeBytes = file.size;
     this.completedChunks = [];
@@ -129,7 +132,6 @@ export class FileUpload {
           this.completeUpload();
           break;
         case UploadStatus.DONE:
-          this.stopMonitor();
           this.done();
           break;
         default:
@@ -204,6 +206,9 @@ export class FileUpload {
     ) {
       const stats: UploadStats = {
         fileSize: this.file.size,
+        fileName: this.file.name,
+        fullFilePath: this.fileKey,
+        fileType: this.file.type,
         readableSpeed: '0.00 KB/s',
         remainingSize: 0,
         secondsLeft: 0,
@@ -230,6 +235,9 @@ export class FileUpload {
 
     const stats: UploadStats = {
       speed: avgSpeed,
+      fileName: this.file.name,
+      fullFilePath: this.fileKey,
+      fileType: this.file.type,
       readableSpeed: readableFileSize(avgSpeed),
       totalUploaded: this.bytesUploadedUntilNow,
       remainingSize: remainingSize,
@@ -255,7 +263,7 @@ export class FileUpload {
    */
   async start(): Promise<string> {
     this.status = UploadStatus.EVAPORATING;
-    this.startMonitor();
+    this.setStartTime();
 
     const params: CreateMultipartUploadCommandInput = {
       Bucket: this.config.bucket,
@@ -410,23 +418,10 @@ export class FileUpload {
   }
 
   /**
-   * Start the progress monitor
+   * Set start time
    */
-  startMonitor() {
-    if (this.progressInterval) {
-      clearInterval(this.progressInterval);
-    }
+  setStartTime() {
     this.startTime = new Date();
-
-    // this.progressInterval = setInterval(() => {
-    //   this.onProgress();
-    // }, this.config.progressIntervalMS || 10000);
-  }
-
-  stopMonitor() {
-    if (this.progressInterval) {
-      clearInterval(this.progressInterval);
-    }
   }
 
   /**
@@ -498,6 +493,5 @@ export class FileUpload {
     this.uploadId = undefined;
     this.totalFileSizeBytes = 0;
     this.status = UploadStatus.DONE;
-    this.stopMonitor();
   }
 }

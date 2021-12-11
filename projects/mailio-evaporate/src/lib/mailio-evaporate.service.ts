@@ -1,15 +1,16 @@
 import { Inject, Injectable } from '@angular/core';
 import { Sha256 } from '@aws-crypto/sha256-js';
 import { ListMultipartUploadsCommand, ListMultipartUploadsCommandInput, MultipartUpload, S3Client, S3ClientConfig } from '@aws-sdk/client-s3';
-import { Observable, Subject } from 'rxjs';
+import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { MAILIO_EVAPORATE_CONFIG } from './config';
-import { EvaporateProgress } from './models/EvaporateProgress';
-import { MailioEvaporateConfig, validateConfig } from './models/MailioEvaporateConfig';
+import { EvaporateProgress } from './Types/EvaporateProgress';
 import { awsSignatureV4AuthMiddleware } from './awsAuthPlugin/AWSSignatureV4AuthMiddleware';
 import { FileUpload } from './Upload/FileUpload';
 import { s3EncodedObjectName } from './Utils/Utils';
 import { MailioAWSSignatureV4 } from './awsAuthPlugin/MailioAwsSignatureV4';
-
+import { MailioSignatureInit } from './awsAuthPlugin/mailioSignatureInit';
+import { MailioEvaporateConfig, validateConfig } from './Types/MailioEvaporateConfig';
+import { UploadStats } from './Types/UploadStats';
 
 @Injectable({
   providedIn: 'root'
@@ -18,19 +19,24 @@ export class MailioEvaporateService {
 
   // main evaporate structures
   config: MailioEvaporateConfig;
-  queue:FileUpload[];
+  private queue:FileUpload[];
+  private stats: UploadStats[];
   s3client: S3Client;
   awsV4Signer: MailioAWSSignatureV4;
 
   // progress
-  public uploadProgress$:Observable<EvaporateProgress>;
+  private uploadProgress$:Observable<EvaporateProgress>;
   private uploadProgress:Subject<EvaporateProgress>;
+
+  // publicly available observables following observable data source pattern
+  private _uploads:BehaviorSubject<UploadStats[]> = new BehaviorSubject<UploadStats[]>([]);
 
   constructor(@Inject(MAILIO_EVAPORATE_CONFIG) config: MailioEvaporateConfig) {
     validateConfig(config);
     this.config = config;
     // init other values
     this.queue = [];
+    this.stats = [];
 
     /**
      * Upload progress
@@ -42,24 +48,56 @@ export class MailioEvaporateService {
     const s3Config:S3ClientConfig = {
       credentials: {
         accessKeyId: config.awsKey,
-        secretAccessKey: 'abcdef',
+        secretAccessKey: 'empty', // the string doesn't matter but has to be here due to S3Client restrictions
       },
       region: config.awsRegion,
     };
     const awsclient = new S3Client(s3Config);
     this.s3client = awsclient;
 
-    const signerInit = {
+    const signerInit: MailioSignatureInit = {
       service: config.awsService,
       region: config.awsRegion,
       sha256: Sha256,
-      credentials: {
+      awsCredentials: {
         accessKeyId: config.awsKey,
-        secretAccessKey: 'notimportantsecretheresiceweregoingtoserver',
       },
+      authServerUrl: config.authServerUrl,
     };
+
+    // init authentication signing plugin middleware
     this.awsV4Signer = new MailioAWSSignatureV4(signerInit);
     this.s3client.middlewareStack.add(awsSignatureV4AuthMiddleware(this.awsV4Signer), { step: 'finalizeRequest', priority: 'high', name: 'mailioAuthPlugin' });
+
+
+    // subscribe to FileUpload Evaporate events and update stats array for the files
+    this.uploadProgress$.subscribe((progress: EvaporateProgress) => {
+      // find a file in the queue by uploadId if exists
+      // it should exist, otherwise this.add method has failed ( -> CreateMultipartUploadCommand)
+      let foundFileUploadIndex = -1;
+      if (progress.uploadId) {
+        foundFileUploadIndex = this.queue.findIndex((fu: FileUpload) => (fu.uploadId === progress.uploadId));
+      }
+      if (foundFileUploadIndex > -1) {
+        // if stats found update, otherwise add to the stats array
+        const statIndex:number = this.stats.findIndex((stat:UploadStats) => (stat.uploadId! === progress.uploadId!));
+
+         if (statIndex > -1) {
+           // found it
+           this.stats[statIndex] = progress.stats;
+         } else {
+           this.stats.push(progress.stats);
+         }
+        this._uploads.next(this.stats);
+      }
+    });
+  }
+
+  /**
+   * Returns observable upload list of files that are in the upload process (start to finish)
+   */
+  get uploads():Observable<UploadStats[]> {
+    return this._uploads.asObservable();
   }
 
   /**
@@ -102,12 +140,13 @@ export class MailioEvaporateService {
   }
 
   /**
-   * Add file to the upload queue
+   * Add file to the upload queue.
    *
    * @param file File to upload
+   * @param path Optional subpath parameter for files requiring folder hierarchy (e.g. /bucket/path/filename.png)
    * @returns Promise (resolve or reject) with uploadId
    */
-  async add(file:File): Promise<string> {
+  async add(file:File, path?:string): Promise<string> {
     return new Promise((resolve, reject) => {
       if (typeof file === 'undefined' || typeof file === 'undefined') {
         return reject('Missing file');
@@ -118,7 +157,7 @@ export class MailioEvaporateService {
       const fileName:string = s3EncodedObjectName(file.name);
       const fileToUpload:File = new File([file], fileName, {type: file.type});
 
-      const fileUpload = new FileUpload(fileToUpload, this.s3client, this.config);
+      const fileUpload = new FileUpload(this.s3client, this.config, fileToUpload, path);
       fileUpload.start().then((uploadId:string) => {
         fileUpload.uploadStats$.subscribe((stats) => {
             this.uploadProgress.next({stats, filename: fileName, uploadId: uploadId});
