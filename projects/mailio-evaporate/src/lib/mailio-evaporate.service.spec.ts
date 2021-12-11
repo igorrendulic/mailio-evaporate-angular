@@ -8,8 +8,6 @@ import { SignatureV4, SignatureV4CryptoInit, SignatureV4Init } from '@aws-sdk/si
 import { Sha256 } from '@aws-crypto/sha256-js';
 import { MailioAWSSignatureV4 } from './awsAuthPlugin/MailioAwsSignatureV4';
 import { MailioSignatureInit } from './awsAuthPlugin/mailioSignatureInit';
-import { rejects } from 'assert';
-import { UploadStats } from './Types/UploadStats';
 
 interface environemntVariables {
   AWS_ACCESS_KEY_ID: string;

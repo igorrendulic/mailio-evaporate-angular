@@ -157,6 +157,19 @@ export class MailioEvaporateService {
       const fileName:string = s3EncodedObjectName(file.name);
       const fileToUpload:File = new File([file], fileName, {type: file.type});
 
+      // strip possible starting or ending path /
+      if (path) {
+        if (path.startsWith('/')) {
+          path = path.substring(1);
+        }
+        if (path.endsWith('/')) {
+          path = path.slice(0, -1);
+        }
+        if (path.includes('\\')) {
+          return reject('illegal character in path');
+        }
+      }
+
       const fileUpload = new FileUpload(this.s3client, this.config, fileToUpload, path);
       fileUpload.start().then((uploadId:string) => {
         fileUpload.uploadStats$.subscribe((stats) => {
