@@ -9,6 +9,7 @@ import { Sha256 } from '@aws-crypto/sha256-js';
 import { MailioAWSSignatureV4 } from './awsAuthPlugin/MailioAwsSignatureV4';
 import { MailioSignatureInit } from './awsAuthPlugin/mailioSignatureInit';
 import { rejects } from 'assert';
+import { UploadStats } from './Types/UploadStats';
 
 interface environemntVariables {
   AWS_ACCESS_KEY_ID: string;
@@ -108,9 +109,12 @@ describe('MailioEvaporateService', () => {
             let part = new Uint8Array(body!);
             const blob = new Blob([part]);
             const file = new File([blob], 'Large-Sample-png-Image-download-for-Testing.png', {type: 'image/png'});
-            //TODO: add listener to the file uploads
 
-            service.add(file).then((uploadId:string) => {
+            service.uploads.subscribe((stats) => {
+              console.log(stats);
+            })
+
+            service.add(file, 'igor/test').then((uploadId:string) => {
               console.log('succesfully added to queue');
               setTimeout(() => {
                 service.pause(uploadId).then(() => {

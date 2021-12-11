@@ -83,10 +83,11 @@ export class FileUpload {
     // init
     this.config = config;
     if (fileSubPath) {
-      this.fileKey = decodeURIComponent(`${config.bucket}/${fileSubPath}/${file.name}`);
+      this.fileKey = decodeURIComponent(`${fileSubPath}/${file.name}`);
     } else {
-      this.fileKey = decodeURIComponent(`${config.bucket}/${file.name}`);
+      this.fileKey = decodeURIComponent(`${file.name}`);
     }
+
     this.file = file;
     this.totalFileSizeBytes = file.size;
     this.completedChunks = [];
@@ -104,7 +105,6 @@ export class FileUpload {
 
     // handling internal FileUpload events
     this.events.subscribe((event: InternalEvent) => {
-      // console.log('internal event: ', event);
       this.reason = event.payload;
       switch (event.type) {
         case UploadStatus.START: // start the upload
@@ -207,7 +207,7 @@ export class FileUpload {
       const stats: UploadStats = {
         fileSize: this.file.size,
         fileName: this.file.name,
-        fullFilePath: this.fileKey,
+        fullFilePath:`${this.config.bucket}/${this.fileKey}`,
         fileType: this.file.type,
         readableSpeed: '0.00 KB/s',
         remainingSize: 0,
@@ -216,7 +216,6 @@ export class FileUpload {
         progress: 0,
         totalUploaded: 0,
         error: this.reason instanceof Error ? this.reason : undefined,
-        message: this.reason instanceof Error ? undefined : this.reason,
         status: this.status,
         uploadId: this.uploadId,
       };
@@ -224,19 +223,15 @@ export class FileUpload {
       return stats;
     }
 
-    console.log('bytes uploaded until now: ', this.bytesUploadedUntilNow);
-
     let delta =
       (new Date().getTime() - (this.startTime?.getTime() || 0)) / 1000;
     let avgSpeed = this.bytesUploadedUntilNow / delta;
     let remainingSize = this.totalFileSizeBytes - this.bytesUploadedUntilNow;
 
-    console.log('delta: ', delta);
-
     const stats: UploadStats = {
       speed: avgSpeed,
       fileName: this.file.name,
-      fullFilePath: this.fileKey,
+      fullFilePath:`${this.config.bucket}/${this.fileKey}`,
       fileType: this.file.type,
       readableSpeed: readableFileSize(avgSpeed),
       totalUploaded: this.bytesUploadedUntilNow,
@@ -246,7 +241,7 @@ export class FileUpload {
       progress: this.bytesUploadedUntilNow / this.totalFileSizeBytes,
       status: this.status,
       uploadId: this.uploadId,
-      message: this.reason instanceof Error ? undefined : this.reason,
+      error: this.reason instanceof Error ? this.reason : undefined,
     };
 
     if (avgSpeed > 0) {
@@ -267,7 +262,7 @@ export class FileUpload {
 
     const params: CreateMultipartUploadCommandInput = {
       Bucket: this.config.bucket,
-      Key: this.file.name,
+      Key: this.fileKey,
       ContentType: this.file.type,
     };
     const multipartUpload = new CreateMultipartUploadCommand(params);
@@ -294,7 +289,7 @@ export class FileUpload {
     return new Promise<FileChunk>((resolve, reject) => {
       if (this.uploadId != null) {
         const uploadPartInput: UploadPartCommandInput = {
-          Key: this.file.name,
+          Key: this.fileKey,
           Bucket: this.config.bucket,
           UploadId: this.uploadId,
           PartNumber: fileChunk.partNumber,
@@ -372,12 +367,12 @@ export class FileUpload {
       };
 
       // if part transformation function is defined, transform the part
-      if (this.config.transformPart) {
-          const transformedPart = await this.config.transformPart(filePart, isFirstChunk, isLastChunk);
-          fileChunk.chunk = transformedPart;
-      } else {
+      // if (this.config.transformPart) {
+          // const transformedPart = await this.config.transformPart(filePart, isFirstChunk, isLastChunk);
+          // fileChunk.chunk = transformedPart;
+      // } else {
         fileChunk.chunk = filePart;
-      }
+      // }
 
 
       this.partsInProgress.push(fileChunk);
@@ -396,7 +391,7 @@ export class FileUpload {
       const completeMultipartUploadInput: CompleteMultipartUploadCommandInput =
         {
           Bucket: this.config.bucket,
-          Key: this.file.name,
+          Key: this.fileKey,
           UploadId: this.uploadId!,
           MultipartUpload: {
             Parts: this.completedChunks,
@@ -433,7 +428,7 @@ export class FileUpload {
     return new Promise((resolve, reject) => {
       const abortInput: AbortMultipartUploadCommandInput = {
         Bucket: this.config.bucket,
-        Key: this.file.name,
+        Key: this.fileKey,
         UploadId: upload.UploadId,
       };
       const abortCommand = new AbortMultipartUploadCommand(abortInput);
@@ -456,7 +451,7 @@ export class FileUpload {
   abort(): Promise<boolean> {
     if (this.uploadId && this.file) {
       const upload: MultipartUpload = {
-        Key: this.file.name,
+        Key: this.fileKey,
         UploadId: this.uploadId!,
       };
       return this.__abort(upload);

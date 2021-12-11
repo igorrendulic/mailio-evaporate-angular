@@ -12,7 +12,6 @@ export interface UploadStats {
   fileType?: string,
   fullFilePath: string,
   error?: Error,
-  message?: string,
   progress: number,
   status: UploadStatus,
   uploadId?: string,
