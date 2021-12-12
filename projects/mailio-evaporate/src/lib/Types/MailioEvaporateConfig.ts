@@ -2,7 +2,6 @@ export interface MailioEvaporateConfig {
   maxConcurrentParts?: number,
   partSize?: number,
   bucket: string,
-  presignUrl: string,
   awsKey: string,
   awsRegion: string,
   timeOffsetMs?: number,

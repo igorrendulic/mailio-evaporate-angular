@@ -32,6 +32,7 @@ export class MailioEvaporateService {
   private _uploads:BehaviorSubject<UploadStats[]> = new BehaviorSubject<UploadStats[]>([]);
 
   constructor(@Inject(MAILIO_EVAPORATE_CONFIG) config: MailioEvaporateConfig) {
+    console.log('service constructor called: ', config);
     validateConfig(config);
     this.config = config;
     // init other values
