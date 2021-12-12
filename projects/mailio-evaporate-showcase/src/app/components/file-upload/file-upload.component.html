@@ -1,6 +1,7 @@
 <h1>Mailio Evaporate file upload demo</h1>
 
 <div>
+  <div class="error">{{errorMessage}}</div>
   <div class="uploadfilecontainer" (click)="fileInput.click()" appDragAndDrop (files)="filesDropped($event)">
     <input hidden type="file" #fileInput (change)="fileAdded($event)">
   </div>

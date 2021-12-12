@@ -1,5 +1,5 @@
 import { Component, OnInit } from '@angular/core';
-import { MailioEvaporateService } from 'mailio-evaporate';
+import { MailioEvaporateService } from 'projects/mailio-evaporate/src/public-api';
 import { FileHandle } from '../../directives/drag-and-drop.directive';
 
 @Component({
@@ -12,14 +12,16 @@ export class FileUploadComponent implements OnInit {
   errorMessage:string = '';
 
   constructor(private evaporate:MailioEvaporateService) {
-
   }
 
   ngOnInit(): void {
+    this.evaporate.uploads.subscribe((stats) => {
+      console.log('upload progress: ', stats);
+    });
   }
 
   /**
-   * Handling files dropped
+   * Handling files dropped into the upload zone
    * @param files
    */
   filesDropped(files: FileHandle[]): void {
@@ -29,33 +31,39 @@ export class FileUploadComponent implements OnInit {
         return;
       }
     });
+    // upload validates files
+    files.forEach(fileHandle => {
+      this.evaporate.add(fileHandle.file).then((uploadId:string) => {
+        console.log('file added: ', uploadId);
+      }).catch((err) => {
+        console.error(err);
+        this.errorMessage = 'failed to upload file. check your configuration';
+      });
+    });
   }
 
   /**
-   * Validate each file...only PDF up to 256KB allowed
+   * Validate files to be images only
    * @param file
    * @returns
    */
   validateFile(file:File):boolean {
     let type = file.type;
-    if (!type.startsWith("image/png")) {
-      this.errorMessage = "Please upload PNG image";
-      return false;
-    }
-    if (file.size > 256000) {
-      this.errorMessage = "File too large. Maximum allowed size is 256 Kb";
+    if (!type.startsWith("image")) {
+      this.errorMessage = "Only images allowed";
       return false;
     }
     return true;
   }
 
+
+  /**
+   *
+   * @param files Files added by clicking on the upload button
+   */
   fileAdded(files: any) {
     this.errorMessage = '';
-    if (files && files.length > 0) {
-      let f = files as File[];
-      if (this.validateFile(f[0])) {
-      }
-    }
+    console.log('files added: ', files);
   }
 
 }

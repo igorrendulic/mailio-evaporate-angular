@@ -18,11 +18,11 @@ import { UploadStats } from './Types/UploadStats';
 export class MailioEvaporateService {
 
   // main evaporate structures
-  config: MailioEvaporateConfig;
+  private config: MailioEvaporateConfig;
   private queue:FileUpload[];
   private stats: UploadStats[];
-  s3client: S3Client;
-  awsV4Signer: MailioAWSSignatureV4;
+  private s3client: S3Client;
+  private awsV4Signer: MailioAWSSignatureV4;
 
   // progress
   private uploadProgress$:Observable<EvaporateProgress>;
@@ -32,7 +32,6 @@ export class MailioEvaporateService {
   private _uploads:BehaviorSubject<UploadStats[]> = new BehaviorSubject<UploadStats[]>([]);
 
   constructor(@Inject(MAILIO_EVAPORATE_CONFIG) config: MailioEvaporateConfig) {
-    console.log('service constructor called: ', config);
     validateConfig(config);
     this.config = config;
     // init other values
