@@ -1,6 +1,8 @@
 import { ModuleWithProviders, NgModule } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { MailioEvaporateConfig, MailioEvaporateService, MAILIO_EVAPORATE_CONFIG } from '../public-api';
+import { MailioEvaporateService, MAILIO_EVAPORATE_CONFIG } from '../public-api';
+import { MailioEvaporateConfig } from './mailio-evaporate-types';
+
 
 @NgModule({
   declarations: [],

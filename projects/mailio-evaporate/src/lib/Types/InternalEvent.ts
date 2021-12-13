@@ -1,4 +1,4 @@
-import { UploadStatus } from "./UploadConstants";
+import { UploadStatus } from "../mailio-evaporate-types";
 
 export interface InternalEvent {
   type: UploadStatus;

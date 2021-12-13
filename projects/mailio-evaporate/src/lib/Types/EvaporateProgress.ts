@@ -1,4 +1,4 @@
-import { UploadStats } from "./UploadStats";
+import { UploadStats } from "../mailio-evaporate-types";
 
 export interface EvaporateProgress {
   stats: UploadStats;

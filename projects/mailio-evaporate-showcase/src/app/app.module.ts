@@ -6,6 +6,11 @@ import { AppComponent } from './app.component';
 import { DragAndDropDirective } from './directives/drag-and-drop.directive';
 import { FileUploadComponent } from './components/file-upload/file-upload.component';
 import { MailioEvaporateModule, MailioEvaporateConfig } from 'projects/mailio-evaporate/src/public-api';
+import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
+import { MatBottomSheetModule } from '@angular/material/bottom-sheet';
+import { MatListModule } from '@angular/material/list';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { UploadProgressComponent } from './components/upload-progress/upload-progress.component';
 
 const mailioConfig: MailioEvaporateConfig = {
     bucket: 'mailio-development',
@@ -21,11 +26,16 @@ const mailioConfig: MailioEvaporateConfig = {
   declarations: [
     AppComponent,
     DragAndDropDirective,
-    FileUploadComponent
+    FileUploadComponent,
+    UploadProgressComponent
   ],
   imports: [
     BrowserModule,
     AppRoutingModule,
+    BrowserAnimationsModule,
+    MatBottomSheetModule,
+    MatProgressBarModule,
+    MatListModule,
     MailioEvaporateModule.forRoot(mailioConfig),
   ],
   bootstrap: [AppComponent]

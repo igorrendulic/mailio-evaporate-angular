@@ -9,8 +9,7 @@ import { FileUpload } from './Upload/FileUpload';
 import { s3EncodedObjectName } from './Utils/Utils';
 import { MailioAWSSignatureV4 } from './awsAuthPlugin/MailioAwsSignatureV4';
 import { MailioSignatureInit } from './awsAuthPlugin/mailioSignatureInit';
-import { MailioEvaporateConfig, validateConfig } from './Types/MailioEvaporateConfig';
-import { UploadStats } from './Types/UploadStats';
+import { MailioEvaporateConfig, UploadStats, validateConfig } from './mailio-evaporate-types';
 
 @Injectable({
   providedIn: 'root'

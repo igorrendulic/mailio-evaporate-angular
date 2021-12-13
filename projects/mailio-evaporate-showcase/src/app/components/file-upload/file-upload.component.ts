@@ -1,6 +1,14 @@
 import { Component, OnInit } from '@angular/core';
-import { MailioEvaporateService } from 'projects/mailio-evaporate/src/public-api';
+import { MailioEvaporateService, UploadStats } from 'projects/mailio-evaporate/src/public-api';
 import { FileHandle } from '../../directives/drag-and-drop.directive';
+import { MatBottomSheet, MatBottomSheetConfig } from '@angular/material/bottom-sheet';
+import { UploadProgressComponent } from '../upload-progress/upload-progress.component';
+import { UploadProgressService } from '../../services/upload-progress.service';
+
+const bottomSheetConfig:MatBottomSheetConfig = {
+  disableClose: true,
+  hasBackdrop: false,
+};
 
 @Component({
   selector: 'app-file-upload',
@@ -10,13 +18,23 @@ import { FileHandle } from '../../directives/drag-and-drop.directive';
 export class FileUploadComponent implements OnInit {
 
   errorMessage:string = '';
+  isUploadProgressOpened:boolean = false;
 
-  constructor(private evaporate:MailioEvaporateService) {
+  constructor(private evaporate:MailioEvaporateService,
+              private _bottomSheet: MatBottomSheet,
+              private uploadProgressService: UploadProgressService) {
+  }
+
+  openUploadProgressSheet(): void {
+    if (!this.isUploadProgressOpened) {
+      this._bottomSheet.open(UploadProgressComponent, bottomSheetConfig);
+      this.isUploadProgressOpened = true;
+    }
   }
 
   ngOnInit(): void {
-    this.evaporate.uploads.subscribe((stats) => {
-      console.log('upload progress: ', stats);
+    this.evaporate.uploads.subscribe((stats: UploadStats[]) => {
+      this.uploadProgressService.setUploadProgress(stats);
     });
   }
 
@@ -34,7 +52,7 @@ export class FileUploadComponent implements OnInit {
     // upload validates files
     files.forEach(fileHandle => {
       this.evaporate.add(fileHandle.file).then((uploadId:string) => {
-        console.log('file added: ', uploadId);
+        this.openUploadProgressSheet();
       }).catch((err) => {
         console.error(err);
         this.errorMessage = 'failed to upload file. check your configuration';

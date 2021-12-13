@@ -19,9 +19,6 @@ import { from, merge, Observable, of, Subject } from 'rxjs';
 import * as SparkMD5 from 'spark-md5';
 import { FileChunk } from '../Types/FileChunk';
 import { InternalEvent } from '../Types/InternalEvent';
-import { MailioEvaporateConfig } from '../Types/MailioEvaporateConfig';
-import { UploadStatus } from '../Types/UploadConstants';
-import { UploadStats } from '../Types/UploadStats';
 import { base64ToHex, readableFileSize } from '../Utils/Utils';
 import {
   bufferToggle,
@@ -33,6 +30,7 @@ import {
   share,
   windowToggle,
 } from 'rxjs/operators';
+import { MailioEvaporateConfig, UploadStats, UploadStatus } from '../mailio-evaporate-types';
 
 export class FileUpload {
   // s3 client

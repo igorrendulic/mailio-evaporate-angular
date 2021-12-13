@@ -40,3 +40,34 @@ export const validateConfig = (config: MailioEvaporateConfig): void  => {
     config.awsRegion = 'us-east-1';
   }
 };
+
+export const enum UploadStatus {
+  START = 'start',
+  PENDING = 'pending',
+  EVAPORATING = 'evaporating',
+  COMPLETE = 'complete',
+  PAUSED = 'paused',
+  CANCELED = 'canceled',
+  ERROR = 'error',
+  ABORTED = 'aborted',
+  PAUSING = 'pausing',
+  DONE = 'done',
+}
+
+export interface UploadStats {
+  speed: number;
+  readableSpeed: string;
+  // loaded: number; // number of uploaded files bytes
+  totalUploaded: number;
+  remainingSize: number,
+  secondsLeft: number,
+  fileSize: number,
+  fileName: string,
+  fileType?: string,
+  fullFilePath: string,
+  error?: Error,
+  progress: number,
+  status: UploadStatus,
+  uploadId?: string,
+}
+
